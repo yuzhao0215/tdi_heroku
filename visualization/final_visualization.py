@@ -33,7 +33,10 @@ import requests
 import os
 import boto3
 
+from io import BytesIO
+import joblib
 
+# below for heroku env
 client = boto3.client(
     's3',
     aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
@@ -42,6 +45,17 @@ client = boto3.client(
 )
 
 bucket_name = os.getenv("S3_BUCKET_NAME")
+
+# # below for local env
+# client = boto3.client(
+#     's3',
+#     aws_access_key_id="AKIAQF3NP3LVMOUHVKFU",
+#     aws_secret_access_key="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",
+#     region_name='us-east-2'
+# )
+#
+# bucket_name = "tdistaticfiles"
+
 print("--------------Bucket name is: {}".format(bucket_name))
 
 logo_img_obj = client.get_object(
@@ -62,7 +76,8 @@ with urlopen('https://raw.githubusercontent.com/plotly/datasets/master/geojson-c
 
 corn_yield_with_fips = pd.read_csv(corn_yield_with_fips_obj['Body'])
 
-corn_yield_with_fips['CountyFIPS'] = corn_yield_with_fips['CountyFIPS'].apply(lambda x: str(x).strip('.0'))  # todo better strip later
+corn_yield_with_fips['CountyFIPS'] = corn_yield_with_fips['CountyFIPS'].apply(
+    lambda x: str(x).strip('.0'))  # todo better strip later
 
 # latest year of corn yield data
 latest_year = corn_yield_with_fips['Year'].max()
@@ -92,7 +107,7 @@ logo_img = Image.open(logo_img_obj['Body'])
 
 app.layout = html.Div([
     dbc.Row([
-        dbc.Col(html.Img(src=logo_img, style={'width':'100%'}), width={'size': 6, 'offset': 3}),
+        dbc.Col(html.Img(src=logo_img, style={'width': '100%'}), width={'size': 6, 'offset': 3}),
     ]),
     dbc.Row([
         dbc.Col(html.P('Please select a year for history distribution:', style={'font-size': 20}),
@@ -232,8 +247,23 @@ def processing_custom_year(df_weather_custom_year_, fips_, growing_year_):
         temp_df = preprocess_by_month(df_weather_custom_year_, growing_month_)
 
         try:
-            linear_model = load(f'../model/cache/linear_models/{fips_}_linear.joblib')
-            linear_error_model = load(f'../model/cache/linear_error_models/{fips_}_{actual_month_}.joblib')
+            # read from s3
+            with BytesIO() as f1:
+                linear_model_obj = client.download_fileobj(Bucket=bucket_name,
+                                                           Key=f'model/linear_models/{fips_}_linear.joblib', Fileobj=f1)
+                f1.seek(0)
+                linear_model = joblib.load(f1)
+
+            with BytesIO() as f2:
+                linear_error_model_obj = client.download_fileobj(Bucket=bucket_name,
+                                                                 Key=f'model/linear_error_models/{fips_}_{actual_month_}.joblib',
+                                                                 Fileobj=f2)
+                f2.seek(0)
+                linear_error_model = joblib.load(f2)
+
+            # below for local reading
+            # linear_model = load(f'../model/cache/linear_models/{fips_}_linear.joblib')
+            # linear_error_model = load(f'../model/cache/linear_error_models/{fips_}_{actual_month_}.joblib')
             linear_prediction = linear_model.predict(np.array([growing_year_]).reshape(-1, 1))[0]
             liner_error_prediction = linear_error_model.predict(temp_df)[0]
             prediction = linear_prediction + liner_error_prediction
@@ -312,8 +342,20 @@ def processing(df_weather_until_last_month_, fips_):
 
         temp_df = preprocess_by_month(df_weather_until_last_month_, gm)
 
-        linear_model = load(f'../model/cache/linear_models/{fips_}_linear.joblib')
-        linear_error_model = load(f'../model/cache/linear_error_models/{fips_}_{am}.joblib')
+        # read from s3
+        with BytesIO() as f1:
+            linear_model_obj = client.download_fileobj(Bucket=bucket_name, Key=f'model/linear_models/{fips_}_linear.joblib', Fileobj=f1)
+            f1.seek(0)
+            linear_model = joblib.load(f1)
+
+        with BytesIO() as f2:
+            linear_error_model_obj = client.download_fileobj(Bucket=bucket_name, Key=f'model/linear_error_models/{fips_}_{am}.joblib', Fileobj=f2)
+            f2.seek(0)
+            linear_error_model = joblib.load(f2)
+
+        # load from local files
+        # linear_model = load(f'../model/cache/linear_models/{fips_}_linear.joblib')
+        # linear_error_model = load(f'../model/cache/linear_error_models/{fips_}_{am}.joblib')
 
         linear_prediction = linear_model.predict(np.array([cur_year]).reshape(-1, 1))[0]
         liner_error_prediction = linear_error_model.predict(temp_df)[0]
@@ -332,100 +374,100 @@ def processing(df_weather_until_last_month_, fips_):
 def update_county_custom_weather(state_, county_, custom_year_):
     fig_weather = make_subplots(specs=[[{"secondary_y": True}]])
     fig_yields = go.Figure()
+    #
+    # fips_ = find_fips(state_, county_)
+    # df_weather_custom_year = read_county_weather_custom_year(fips_, custom_year_)
+    #
+    # fig_weather.add_trace(
+    #     go.Scatter(x=df_weather_custom_year['date'], y=df_weather_custom_year['avgt'], mode="lines",
+    #                name="Average Temperature", opacity=0.5,
+    #                line=dict(color='firebrick', width=4)), secondary_y=False
+    # )
+    # fig_weather.add_trace(
+    #     go.Scatter(x=df_weather_custom_year['date'], y=df_weather_custom_year['pcpn'], mode="lines",
+    #                name="Precipitation", opacity=0.8,
+    #                line=dict(color='royalblue', width=4)), secondary_y=True
+    # )
+    # fig_weather.update_layout(xaxis_title="Time", yaxis_title="Temperature (F)",
+    #                           title=f"Daily Weather and Yield Prediction in {custom_year_}")
+    # fig_weather.update_yaxes(title_text="Precipitation (inches)", secondary_y=True)
+    #
+    # dates, predicted_yields, _, corn_yield_custom_year = processing_custom_year(df_weather_custom_year, fips_,
+    #                                                                             custom_year_)
+    #
+    # fig_yields = go.Figure(data=go.Scatter(x=dates, y=predicted_yields, mode='markers', name='predicted yields',
+    #                                        marker=dict(
+    #                                            color='yellow',
+    #                                            size=20,
+    #                                            line=dict(
+    #                                                color='green',
+    #                                                width=4
+    #                                            )
+    #                                        ),
+    #                                        ))
+    #
+    # fig_yields.update_xaxes(title_text='Time')
+    # fig_yields.update_yaxes(title_text="Corn Yield Prediction (BU/ACRE)", range=[50, 250])
+    #
+    # if corn_yield_custom_year >= 0:
+    #     fig_yields.add_trace(
+    #         go.Scatter(x=[datetime.datetime(custom_year_, 11, 1)], y=[corn_yield_custom_year], mode="markers",
+    #                    name="Actual Yield", opacity=0.8,
+    #                    marker=dict(
+    #                        color='blue',
+    #                        size=20,
+    #                        line=dict(
+    #                            color='green',
+    #                            width=4
+    #                        )
+    #                    ), )
+    #     )
 
-    fips_ = find_fips(state_, county_)
-    df_weather_custom_year = read_county_weather_custom_year(fips_, custom_year_)
+    try:
+        fips_ = find_fips(state_, county_)
+        df_weather_custom_year = read_county_weather_custom_year(fips_, custom_year_)
 
-    fig_weather.add_trace(
-        go.Scatter(x=df_weather_custom_year['date'], y=df_weather_custom_year['avgt'], mode="lines",
-                   name="Average Temperature", opacity=0.5,
-                   line=dict(color='firebrick', width=4)), secondary_y=False
-    )
-    fig_weather.add_trace(
-        go.Scatter(x=df_weather_custom_year['date'], y=df_weather_custom_year['pcpn'], mode="lines",
-                   name="Precipitation", opacity=0.8,
-                   line=dict(color='royalblue', width=4)), secondary_y=True
-    )
-    fig_weather.update_layout(xaxis_title="Time", yaxis_title="Temperature (F)",
-                              title=f"Daily Weather and Yield Prediction in {custom_year_}")
-    fig_weather.update_yaxes(title_text="Precipitation (inches)", secondary_y=True)
-
-    dates, predicted_yields, _, corn_yield_custom_year = processing_custom_year(df_weather_custom_year, fips_,
-                                                                                custom_year_)
-
-    fig_yields = go.Figure(data=go.Scatter(x=dates, y=predicted_yields, mode='markers', name='predicted yields',
-                                           marker=dict(
-                                               color='yellow',
-                                               size=20,
-                                               line=dict(
-                                                   color='green',
-                                                   width=4
-                                               )
-                                           ),
-                                           ))
-
-    fig_yields.update_xaxes(title_text='Time')
-    fig_yields.update_yaxes(title_text="Corn Yield Prediction (BU/ACRE)", range=[50, 250])
-
-    if corn_yield_custom_year >= 0:
-        fig_yields.add_trace(
-            go.Scatter(x=[datetime.datetime(custom_year_, 11, 1)], y=[corn_yield_custom_year], mode="markers",
-                       name="Actual Yield", opacity=0.8,
-                       marker=dict(
-                           color='blue',
-                           size=20,
-                           line=dict(
-                               color='green',
-                               width=4
-                           )
-                       ), )
+        fig_weather.add_trace(
+            go.Scatter(x=df_weather_custom_year['date'], y=df_weather_custom_year['avgt'], mode="lines", name="Average Temperature", opacity=0.5,
+                       line=dict(color='firebrick', width=4)), secondary_y=False
         )
+        fig_weather.add_trace(
+            go.Scatter(x=df_weather_custom_year['date'], y=df_weather_custom_year['pcpn'], mode="lines", name="Precipitation", opacity=0.8,
+                       line=dict(color='royalblue', width=4)), secondary_y=True
+        )
+        fig_weather.update_layout(xaxis_title="Time", yaxis_title="Temperature (F)", title=f"Daily Weather and Yield Prediction in {custom_year_}")
+        fig_weather.update_yaxes(title_text="Precipitation (inches)", secondary_y=True)
 
-    # try:
-    #     fips_ = find_fips(state_, county_)
-    #     df_weather_custom_year = read_county_weather_custom_year(fips_, custom_year_)
-    #
-    #     fig_weather.add_trace(
-    #         go.Scatter(x=df_weather_custom_year['date'], y=df_weather_custom_year['avgt'], mode="lines", name="Average Temperature", opacity=0.5,
-    #                    line=dict(color='firebrick', width=4)), secondary_y=False
-    #     )
-    #     fig_weather.add_trace(
-    #         go.Scatter(x=df_weather_custom_year['date'], y=df_weather_custom_year['pcpn'], mode="lines", name="Precipitation", opacity=0.8,
-    #                    line=dict(color='royalblue', width=4)), secondary_y=True
-    #     )
-    #     fig_weather.update_layout(xaxis_title="Time", yaxis_title="Temperature (F)", title=f"Daily Weather and Yield Prediction in {custom_year_}")
-    #     fig_weather.update_yaxes(title_text="Precipitation (inches)", secondary_y=True)
-    #
-    #     dates, predicted_yields, _, corn_yield_custom_year = processing_custom_year(df_weather_custom_year, fips_, custom_year_)
-    #
-    #     fig_yields = go.Figure(data=go.Scatter(x=dates, y=predicted_yields, mode='markers', name='predicted yields',
-    #                              marker=dict(
-    #                                  color='yellow',
-    #                                  size=20,
-    #                                  line=dict(
-    #                                      color='green',
-    #                                      width=4
-    #                                  )
-    #                              ),
-    #                              ))
-    #
-    #     fig_yields.update_xaxes(title_text='Time')
-    #     fig_yields.update_yaxes(title_text="Corn Yield Prediction (BU/ACRE)", range=[50, 250])
-    #
-    #     if corn_yield_custom_year >= 0:
-    #         fig_yields.add_trace(
-    #             go.Scatter(x=[datetime.datetime(custom_year_, 11, 1)], y=[corn_yield_custom_year], mode="markers", name="Actual Yield", opacity=0.8,
-    #                        marker=dict(
-    #                            color='blue',
-    #                            size=20,
-    #                            line=dict(
-    #                                color='green',
-    #                                width=4
-    #                            )
-    #                        ),)
-    #         )
-    # except:
-    #     fig_weather.update_layout(title=f"Sorry no model can be found for county: {county_} in {state_}")
+        dates, predicted_yields, _, corn_yield_custom_year = processing_custom_year(df_weather_custom_year, fips_, custom_year_)
+
+        fig_yields = go.Figure(data=go.Scatter(x=dates, y=predicted_yields, mode='markers', name='predicted yields',
+                                 marker=dict(
+                                     color='yellow',
+                                     size=20,
+                                     line=dict(
+                                         color='green',
+                                         width=4
+                                     )
+                                 ),
+                                 ))
+
+        fig_yields.update_xaxes(title_text='Time')
+        fig_yields.update_yaxes(title_text="Corn Yield Prediction (BU/ACRE)", range=[50, 250])
+
+        if corn_yield_custom_year >= 0:
+            fig_yields.add_trace(
+                go.Scatter(x=[datetime.datetime(custom_year_, 11, 1)], y=[corn_yield_custom_year], mode="markers", name="Actual Yield", opacity=0.8,
+                           marker=dict(
+                               color='blue',
+                               size=20,
+                               line=dict(
+                                   color='green',
+                                   width=4
+                               )
+                           ),)
+            )
+    except:
+        fig_weather.update_layout(title=f"Sorry no model can be found for county: {county_} in {state_}")
 
     return fig_weather, fig_yields
 
@@ -488,70 +530,70 @@ def update_county_custom_weather(state_, county_, custom_year_):
 def update_county_realtime_weather(state_, county_):
     fig_weather = make_subplots(specs=[[{"secondary_y": True}]])
     fig_yields = go.Figure()
-
-    fips_ = find_fips(state_, county_)
-    df_weather_until_last_month = read_county_weather_until_last_month(fips_)
-
-    fig_weather.add_trace(
-        go.Scatter(x=df_weather_until_last_month['date'], y=df_weather_until_last_month['avgt'], mode="lines",
-                   name="Average Temperature", opacity=0.5,
-                   line=dict(color='firebrick', width=4)), secondary_y=False
-    )
-    fig_weather.add_trace(
-        go.Scatter(x=df_weather_until_last_month['date'], y=df_weather_until_last_month['pcpn'], mode="lines",
-                   name="Precipitation", opacity=0.8,
-                   line=dict(color='royalblue', width=4)), secondary_y=True
-    )
-    fig_weather.update_layout(xaxis_title="Time", yaxis_title="Temperature (F)",
-                              title="Daily Weather and Yield Prediction from Last Harvest")
-    fig_weather.update_yaxes(title_text="Precipitation (inches)", secondary_y=True)
-
-    dates, predicted_yields = processing(df_weather_until_last_month, fips_)
-    fig_yields = go.Figure(data=go.Scatter(x=dates, y=predicted_yields, mode='markers', name='predicted yields',
-                                           marker=dict(
-                                               color='yellow',
-                                               size=20,
-                                               line=dict(
-                                                   color='green',
-                                                   width=4
-                                               )
-                                           ),
-                                           ))
-
-    fig_yields.update_xaxes(title_text='Time')
-    fig_yields.update_yaxes(title_text="Corn Yield Prediction (BU/ACRE)", range=[50, 250])
-
-    # try:
-    #     fips_ = find_fips(state_, county_)
-    #     df_weather_until_last_month = read_county_weather_until_last_month(fips_)
     #
-    #     fig_weather.add_trace(
-    #         go.Scatter(x=df_weather_until_last_month['date'], y=df_weather_until_last_month['avgt'], mode="lines", name="Average Temperature", opacity=0.5,
-    #                    line=dict(color='firebrick', width=4)), secondary_y=False
-    #     )
-    #     fig_weather.add_trace(
-    #         go.Scatter(x=df_weather_until_last_month['date'], y=df_weather_until_last_month['pcpn'], mode="lines", name="Precipitation", opacity=0.8,
-    #                    line=dict(color='royalblue', width=4)), secondary_y=True
-    #     )
-    #     fig_weather.update_layout(xaxis_title="Time", yaxis_title="Temperature (F)", title="Daily Weather and Yield Prediction from Last Harvest")
-    #     fig_weather.update_yaxes(title_text="Precipitation (inches)", secondary_y=True)
+    # fips_ = find_fips(state_, county_)
+    # df_weather_until_last_month = read_county_weather_until_last_month(fips_)
     #
-    #     dates, predicted_yields = processing(df_weather_until_last_month, fips_)
-    #     fig_yields = go.Figure(data=go.Scatter(x=dates, y=predicted_yields, mode='markers', name='predicted yields',
-    #                              marker=dict(
-    #                                  color='yellow',
-    #                                  size=20,
-    #                                  line=dict(
-    #                                      color='green',
-    #                                      width=4
-    #                                  )
-    #                              ),
-    #                              ))
+    # fig_weather.add_trace(
+    #     go.Scatter(x=df_weather_until_last_month['date'], y=df_weather_until_last_month['avgt'], mode="lines",
+    #                name="Average Temperature", opacity=0.5,
+    #                line=dict(color='firebrick', width=4)), secondary_y=False
+    # )
+    # fig_weather.add_trace(
+    #     go.Scatter(x=df_weather_until_last_month['date'], y=df_weather_until_last_month['pcpn'], mode="lines",
+    #                name="Precipitation", opacity=0.8,
+    #                line=dict(color='royalblue', width=4)), secondary_y=True
+    # )
+    # fig_weather.update_layout(xaxis_title="Time", yaxis_title="Temperature (F)",
+    #                           title="Daily Weather and Yield Prediction from Last Harvest")
+    # fig_weather.update_yaxes(title_text="Precipitation (inches)", secondary_y=True)
     #
-    #     fig_yields.update_xaxes(title_text='Time')
-    #     fig_yields.update_yaxes(title_text="Corn Yield Prediction (BU/ACRE)", range=[50, 250])
-    # except:
-    #     fig_weather.update_layout(title=f"Sorry no model can be found for county: {county_} in {state_}")
+    # dates, predicted_yields = processing(df_weather_until_last_month, fips_)
+    # fig_yields = go.Figure(data=go.Scatter(x=dates, y=predicted_yields, mode='markers', name='predicted yields',
+    #                                        marker=dict(
+    #                                            color='yellow',
+    #                                            size=20,
+    #                                            line=dict(
+    #                                                color='green',
+    #                                                width=4
+    #                                            )
+    #                                        ),
+    #                                        ))
+    #
+    # fig_yields.update_xaxes(title_text='Time')
+    # fig_yields.update_yaxes(title_text="Corn Yield Prediction (BU/ACRE)", range=[50, 250])
+
+    try:
+        fips_ = find_fips(state_, county_)
+        df_weather_until_last_month = read_county_weather_until_last_month(fips_)
+
+        fig_weather.add_trace(
+            go.Scatter(x=df_weather_until_last_month['date'], y=df_weather_until_last_month['avgt'], mode="lines", name="Average Temperature", opacity=0.5,
+                       line=dict(color='firebrick', width=4)), secondary_y=False
+        )
+        fig_weather.add_trace(
+            go.Scatter(x=df_weather_until_last_month['date'], y=df_weather_until_last_month['pcpn'], mode="lines", name="Precipitation", opacity=0.8,
+                       line=dict(color='royalblue', width=4)), secondary_y=True
+        )
+        fig_weather.update_layout(xaxis_title="Time", yaxis_title="Temperature (F)", title="Daily Weather and Yield Prediction from Last Harvest")
+        fig_weather.update_yaxes(title_text="Precipitation (inches)", secondary_y=True)
+
+        dates, predicted_yields = processing(df_weather_until_last_month, fips_)
+        fig_yields = go.Figure(data=go.Scatter(x=dates, y=predicted_yields, mode='markers', name='predicted yields',
+                                 marker=dict(
+                                     color='yellow',
+                                     size=20,
+                                     line=dict(
+                                         color='green',
+                                         width=4
+                                     )
+                                 ),
+                                 ))
+
+        fig_yields.update_xaxes(title_text='Time')
+        fig_yields.update_yaxes(title_text="Corn Yield Prediction (BU/ACRE)", range=[50, 250])
+    except:
+        fig_weather.update_layout(title=f"Sorry no model can be found for county: {county_} in {state_}")
 
     return fig_weather, fig_yields
 
