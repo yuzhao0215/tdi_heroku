@@ -1,7 +1,8 @@
 /data
 /mlvenv
-/model
-!/model/models_for_visualization.py
+/model/cache
+/model/test*.py
+#!/model/models_for_visualization.py
 /scraper/cache
 __pycache__
 /test_s3.py
